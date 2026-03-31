@@ -1,0 +1,4 @@
+.*
+third_party/modules
+.zig-cache
+zml-local
