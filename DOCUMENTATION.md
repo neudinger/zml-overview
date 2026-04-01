@@ -704,10 +704,13 @@ fn heatTransferKernel(row_start: usize, row_end: usize, W: usize, ...) void {
 
 The SIMD kernel loads 64-wide slices for each of the four neighbors simultaneously. Notice that `left` reads from `j-1` and `right` reads from `j+1`—these are aligned memory reads that work correctly because the stencil accesses adjacent elements, not strided ones.
 
-### ZML Implementation — Slicing Approach
+### ZML Implementation — Slicing + StableHLO While Loop
+
+The step logic is extracted into a private helper and the public entry point uses `zml.ops.@"while"` to fold all iterations into a single compiled loop:
 
 ```zig
-pub fn heat_transfer(_: SimpleModel, grid: zml.Tensor) zml.Tensor {
+// Private: one simulation step (slicing approach)
+fn heat_transfer_step(grid: zml.Tensor) zml.Tensor {
     // Extract shifted views using slice operations
     const up    = grid.slice(&.{ .{ .end = -2 }, .{ .start = 1, .end = -1 } });
     const down  = grid.slice(&.{ .{ .start = 2 }, .{ .start = 1, .end = -1 } });
@@ -726,27 +729,63 @@ pub fn heat_transfer(_: SimpleModel, grid: zml.Tensor) zml.Tensor {
     const middle_row = zml.Tensor.concatenate(&.{ left_col, center, right_col }, 1);
     return zml.Tensor.concatenate(&.{ top_row, middle_row, bottom_row }, 0);
 }
-```
 
-This is the most instructive ZML implementation. Rather than using loop indices to shift the stencil, ZML uses **tensor slicing**. `grid.slice(&.{ .{ .end = -2 }, ... })` is equivalent to `grid[0:-2, :]`—it produces a tensor that is 2 rows shorter, representing the "up" neighbor for every interior cell. The border rows/columns are reconstructed via `concatenate`, preserving the Dirichlet boundary condition.
+// Public single-step wrapper (kept for unit tests)
+pub fn heat_transfer(_: SimpleModel, grid: zml.Tensor) zml.Tensor {
+    return heat_transfer_step(grid);
+}
 
-### Benchmark — Ping-Pong Buffer Pattern
+// Public multi-step entry point: runs `steps` iterations via a StableHLO while loop
+pub fn heat_transfer_steps(_: SimpleModel, grid: zml.Tensor, steps: zml.Tensor) zml.Tensor {
+    const Local = struct {
+        fn cond(step_idx: zml.Tensor, _: zml.Tensor, total_steps: zml.Tensor) zml.Tensor {
+            return step_idx.cmp(.LT, total_steps);
+        }
+        fn body(step_idx: zml.Tensor, curr_grid: zml.Tensor, _: zml.Tensor) [2]zml.Tensor {
+            return .{
+                step_idx.add(zml.Tensor.scalar(1, .i32)),
+                SimpleModel.heat_transfer_step(curr_grid),
+            };
+        }
+    };
 
-```zig
-// ZML evolves the grid 100 steps, reusing device buffers
-var curr = zml_in_buf;
-var is_initial = true;
-for (0..steps) |_| {
-    args.set(.{curr});
-    exe.call(args, &results);
-    const next = results.get(zml.Buffer);
-    if (!is_initial) curr.deinit();  // free previous buffer
-    curr = next;
-    is_initial = false;
+    const loop_state = zml.ops.@"while"(
+        .{ zml.Tensor.scalar(0, .i32), grid },
+        Local.cond,
+        Local.body,
+        .{steps},
+    );
+    return loop_state[1];
 }
 ```
 
-For iterative simulations, the output of step `t` becomes the input of step `t+1`. The compiled `exe` is reused across all steps—only the buffer pointers change. This avoids recompilation overhead on each iteration.
+Rather than using loop indices to shift the stencil, ZML uses **tensor slicing**. `grid.slice(&.{ .{ .end = -2 }, ... })` is equivalent to `grid[0:-2, :]`—it produces a tensor that is 2 rows shorter, representing the "up" neighbor for every interior cell. The border rows/columns are reconstructed via `concatenate`, preserving the Dirichlet boundary condition.
+
+`heat_transfer_steps` passes `steps` as a `zml.Tensor` (an `i32` scalar) and drives all iterations inside a **single `stablehlo.while` op**. The loop state carries a step counter and the current grid; the condition checks `step_idx < total_steps` and the body increments the counter and applies one stencil step. This means the compiler sees the entire iterative computation as one graph and can fuse and optimise across iteration boundaries.
+
+### Benchmark — Single Call with StableHLO While
+
+```zig
+// Upload grid and step count to device
+var zml_in_buf = try ctx.bufferFromSlice(shape, grid_init);
+var steps_i32: i32 = @intCast(steps);
+var steps_buf = try ctx.bufferFromSlice(zml.Shape.scalar(.i32), std.mem.asBytes(&steps_i32));
+
+// Compile heat_transfer_steps: takes (grid, steps_tensor)
+var exe = try ctx.platform.compile(
+    ctx.allocator, ctx.io, SimpleModel{}, .heat_transfer_steps,
+    .{ zml.Tensor.fromShape(shape), zml.Tensor.init(.{}, .i32) },
+    .{ .shardings = &.{replicated_sharding} },
+);
+
+// Single call — all iterations run inside the compiled StableHLO while loop
+args.set(.{ zml_in_buf, steps_buf });
+exe.call(args, &results);
+var final_buf: zml.Buffer = results.get(zml.Buffer);
+defer final_buf.deinit();
+```
+
+The `steps` count is now compiled into the graph as a runtime `i32` tensor. All iterations execute within a single `stablehlo.while` op on the device—no host-side loop, no repeated buffer swaps. This gives the XLA compiler visibility over the full iterative sequence and eliminates round-trip dispatch overhead for each step.
 
 ---
 
@@ -942,7 +981,7 @@ pub fn main(init: std.process.Init) !void {
 
 Run everything with:
 ```bash
-bazel run //simple            # run full benchmark suite
+bazel run -c opt //simple            # run full benchmark suite
 bazel test //simple:simple_test       # test reference vs optimized
 bazel run //simple:simple_test_zml    # test ZML model correctness
 ```
@@ -961,7 +1000,7 @@ This project serves as a learning platform for three distinct abstraction levels
 
 Bazel holds the entire stack together: Zig 0.16 (pre-release), ZML (pinned to a specific commit), and LLVM, all reproducibly managed in a hermetic build graph.
 
-The best starting point is `bazel run //simple` and observing the timing differences across the three strategies on local hardware.
+The best starting point is `bazel run -c opt //simple` and observing the timing differences across the three strategies on local hardware.
 
 ---
 
@@ -976,7 +1015,7 @@ Because the project uses Bazel, you can build, run, and test the suite using sta
 
 **To run the main benchmark suite:**
 ```bash
-bazel run //simple
+bazel run -c opt //simple
 ```
 **To run the standard unit tests (verifying `optimized.zig` vs `reference.zig`):**
 ```bash

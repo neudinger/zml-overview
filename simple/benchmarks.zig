@@ -29,6 +29,55 @@ fn expectEq(expected: []const i32, actual: []const i32) !void {
     }
 }
 
+/// Prints two aligned tables after each benchmark run:
+///   Table 1 – raw timing in ns for Zig(Ref), Zig(Opt), and ZML.
+///   Table 2 – speedup factor of each pair (baseline_time / improved_time).
+///              e.g. "10.63x" means 10.63 times faster than the baseline.
+fn printBenchTable(name: []const u8, ref_ns: i96, opt_ns: i96, zml_ns: i96) void {
+    const ref_f: f64 = @floatFromInt(ref_ns);
+    const opt_f: f64 = @floatFromInt(opt_ns);
+    const zml_f: f64 = @floatFromInt(zml_ns);
+
+    // Speedup factor: baseline / candidate  (>1 = faster, <1 = slower)
+    const ovr: f64 = if (opt_f != 0) ref_f / opt_f else 0.0;
+    const zvr: f64 = if (zml_f != 0) ref_f / zml_f else 0.0;
+    const zvo: f64 = if (zml_f != 0) opt_f / zml_f else 0.0;
+
+    var pb1: [32]u8 = undefined;
+    var pb2: [32]u8 = undefined;
+    var pb3: [32]u8 = undefined;
+    const ps1 = std.fmt.bufPrint(&pb1, "{d:.2}x", .{ovr}) catch "ERR";
+    const ps2 = std.fmt.bufPrint(&pb2, "{d:.2}x", .{zvr}) catch "ERR";
+    const ps3 = std.fmt.bufPrint(&pb3, "{d:.2}x", .{zvo}) catch "ERR";
+
+    var tb1: [64]u8 = undefined;
+    var tb2: [64]u8 = undefined;
+    const title1 = std.fmt.bufPrint(&tb1, "{s} - Timing Results", .{name}) catch name;
+    const title2 = std.fmt.bufPrint(&tb2, "{s} - Speedup Factor", .{name}) catch name;
+
+    // Table 1: raw timings
+    log.info("┌──────────────────────────────────────────┐", .{});
+    log.info("│ {s:<40} │", .{title1});
+    log.info("├───────────────────┬──────────────────────┤", .{});
+    log.info("│ {s:<17} │ {s:>20} │", .{ "Implementation", "Time (ns)" });
+    log.info("├───────────────────┼──────────────────────┤", .{});
+    log.info("│ {s:<17} │ {d:>20} │", .{ "Zig (Reference)", ref_ns });
+    log.info("│ {s:<17} │ {d:>20} │", .{ "Zig (Optimized)", opt_ns });
+    log.info("│ {s:<17} │ {d:>20} │", .{ "ZML", zml_ns });
+    log.info("└───────────────────┴──────────────────────┘", .{});
+
+    // Table 2: speedup factors
+    log.info("┌──────────────────────────────────────────┐", .{});
+    log.info("│ {s:<40} │", .{title2});
+    log.info("├────────────┬─────────────────────────────┤", .{});
+    log.info("│ {s:<10} │ {s:>27} │", .{ "Comparison", "Speedup (x faster)" });
+    log.info("├────────────┼─────────────────────────────┤", .{});
+    log.info("│ {s:<10} │ {s:>27} │", .{ "Opt vs Ref", ps1 });
+    log.info("│ {s:<10} │ {s:>27} │", .{ "ZML vs Ref", ps2 });
+    log.info("│ {s:<10} │ {s:>27} │", .{ "ZML vs Opt", ps3 });
+    log.info("└────────────┴─────────────────────────────┘", .{});
+}
+
 /// Benchmarks standard matrix multiplication comparing reference, optimized, and ZML implementations.
 /// Formula: $$C_{i,j} = \sum_{k} A_{i,k} B_{k,j}$$
 pub fn matmul(ctx: *Context) !void {
@@ -101,6 +150,7 @@ pub fn matmul(ctx: *Context) !void {
 
     try expectApproxEq(ref_out, zml_out, 1e-3);
     log.info("✅ MatMul Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
+    printBenchTable("MatMul", ref_ns, opt_ns, zml_ns);
 }
 
 /// Benchmarks single-precision scalar multiplication and vector addition (SAXPY) comparing reference, optimized, and ZML implementations.
@@ -177,6 +227,7 @@ pub fn saxpy(ctx: *Context) !void {
 
     try expectApproxEq(ref_out, zml_out, 1e-4);
     log.info("✅ SAXPY Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
+    printBenchTable("SAXPY", ref_ns, opt_ns, zml_ns);
 }
 
 /// Benchmarks integer matrix multiplication with modulo $Q = 3329$ operation comparing reference, optimized, and ZML implementations.
@@ -249,6 +300,7 @@ pub fn mod_matmul(ctx: *Context) !void {
 
     try expectEq(ref_out, zml_out);
     log.info("✅ ModMatMul Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
+    printBenchTable("ModMatMul", ref_ns, opt_ns, zml_ns);
 }
 
 /// Benchmarks a 2D heat transfer simulation comparing reference, optimized, and ZML implementations.
@@ -327,6 +379,7 @@ pub fn heat_transfer(ctx: *Context) !void {
 
     try expectApproxEq(ref_grid, zml_out, 1e-3);
     log.info("✅ Heat Transfer Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
+    printBenchTable("Heat Transfer", ref_ns, opt_ns, zml_ns);
 }
 
 /// Benchmarks the Black-Scholes option pricing model comparing reference, optimized, and ZML implementations.
@@ -445,4 +498,5 @@ pub fn black_scholes(ctx: *Context) !void {
     try expectApproxEq(ref_put, zml_put, 1e-3);
 
     log.info("✅ Black-Scholes Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
+    printBenchTable("Black-Scholes", ref_ns, opt_ns, zml_ns);
 }
