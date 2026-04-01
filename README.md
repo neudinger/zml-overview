@@ -11,6 +11,8 @@ The project uses Bazel as its build system.
 you can install it with [bazelisk](https://github.com/bazelbuild/bazelisk)
 
 - https://github.com/bazelbuild/bazelisk
+- [Medium Post](https://medium.com/@neudinger/zml-v2-and-zig-0-16-a-high-level-flyover-4298f74369ca)
+- [Documentation](./DOCUMENTATION.md)
 
 ## Benchmarked Algorithms
 
