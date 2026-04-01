@@ -58,12 +58,12 @@ pub fn matmul(ctx: *Context) !void {
     // 1. Zig Reference
     var start: std.Io.Timestamp = std.Io.Clock.awake.now(ctx.io);
     ref.matmul(M, K, N, lhs_data, rhs_data, ref_out);
-    const ref_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const ref_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     // 2. Zig Optimized
     start = std.Io.Clock.awake.now(ctx.io);
     opt.matmul(M, K, N, lhs_data, rhs_data, opt_out);
-    const opt_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const opt_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     try expectApproxEq(ref_out, opt_out, 1e-3);
 
@@ -90,7 +90,7 @@ pub fn matmul(ctx: *Context) !void {
 
     start = std.Io.Clock.awake.now(ctx.io);
     exe.call(args, &results);
-    const zml_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const zml_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     var res_buf: zml.Buffer = results.get(zml.Buffer);
     defer res_buf.deinit();
@@ -100,13 +100,13 @@ pub fn matmul(ctx: *Context) !void {
     try ctx.sliceFromBuffer(res_buf, zml_out);
 
     try expectApproxEq(ref_out, zml_out, 1e-3);
-    log.info("✅ MatMul Verified. Zig(Ref): {d:.2}ms, Zig(Opt): {d:.2}ms, ZML: {d:.2}ms", .{ ref_ms, opt_ms, zml_ms });
+    log.info("✅ MatMul Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
 }
 
 /// Benchmarks single-precision scalar multiplication and vector addition (SAXPY) comparing reference, optimized, and ZML implementations.
 /// Formula: $$Z_i = a \cdot X_i + Y_i$$
 pub fn saxpy(ctx: *Context) !void {
-    const N : usize = 10_000_000;
+    const N: usize = 10_000_000;
     log.info("\nBenchmarking SAXPY ({d} elements)...", .{N});
 
     var a_val: f32 = 2.0;
@@ -130,12 +130,12 @@ pub fn saxpy(ctx: *Context) !void {
     // 1. Zig Reference
     var start: std.Io.Timestamp = std.Io.Clock.awake.now(ctx.io);
     ref.saxpy(N, a_val, x_data, y_data, ref_out);
-    const ref_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const ref_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     // 2. Zig Optimized
     start = std.Io.Clock.awake.now(ctx.io);
     opt.saxpy(N, a_val, x_data, y_data, opt_out);
-    const opt_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const opt_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     try expectApproxEq(ref_out, opt_out, 1e-4);
 
@@ -163,19 +163,20 @@ pub fn saxpy(ctx: *Context) !void {
     var results: zml.exe.Exe.Results = try exe.results(ctx.allocator);
     defer results.deinit(ctx.allocator);
 
-    start = std.Io.Clock.awake.now(ctx.io);
-    exe.call(args, &results);
-    const zml_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
-
-    var res_buf: zml.Buffer = results.get(zml.Buffer);
-    defer res_buf.deinit();
-
     const zml_out = try ctx.allocator.alloc(f32, N);
     defer ctx.allocator.free(zml_out);
+
+    start = std.Io.Clock.awake.now(ctx.io);
+    log.debug("Calling ZML SAXPY Exe with args: {any} at {}", .{ args, start });
+    exe.call(args, &results);
+    var res_buf: zml.Buffer = results.get(zml.Buffer);
+    defer res_buf.deinit();
+    const zml_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
+
     try ctx.sliceFromBuffer(res_buf, zml_out);
 
     try expectApproxEq(ref_out, zml_out, 1e-4);
-    log.info("✅ SAXPY Verified. Zig(Ref): {d:.2}ms, Zig(Opt): {d:.2}ms, ZML: {d:.2}ms", .{ ref_ms, opt_ms, zml_ms });
+    log.info("✅ SAXPY Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
 }
 
 /// Benchmarks integer matrix multiplication with modulo $Q = 3329$ operation comparing reference, optimized, and ZML implementations.
@@ -204,12 +205,12 @@ pub fn mod_matmul(ctx: *Context) !void {
     // 1. Zig Reference
     var start = std.Io.Clock.awake.now(ctx.io);
     ref.mod_matmul(K, K, K, lhs_data, rhs_data, ref_out);
-    const ref_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const ref_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     // 2. Zig Optimized
     start = std.Io.Clock.awake.now(ctx.io);
     opt.mod_matmul(K, K, K, lhs_data, rhs_data, opt_out);
-    const opt_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const opt_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     try expectEq(ref_out, opt_out);
 
@@ -238,17 +239,16 @@ pub fn mod_matmul(ctx: *Context) !void {
 
     start = std.Io.Clock.awake.now(ctx.io);
     exe.call(args, &results);
-    const zml_ms: i64 = start.untilNow(ctx.io, .awake).toMilliseconds();
-
     var res_buf: zml.Buffer = results.get(zml.Buffer);
     defer res_buf.deinit();
+    const zml_ns: i96 = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     const zml_out: []i32 = try ctx.allocator.alloc(i32, K * K);
     defer ctx.allocator.free(zml_out);
     try ctx.sliceFromBuffer(res_buf, zml_out);
 
     try expectEq(ref_out, zml_out);
-    log.info("✅ ModMatMul Verified. Zig(Ref): {d:.2}ms, Zig(Opt): {d:.2}ms, ZML: {d:.2}ms", .{ ref_ms, opt_ms, zml_ms });
+    log.info("✅ ModMatMul Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
 }
 
 /// Benchmarks a 2D heat transfer simulation comparing reference, optimized, and ZML implementations.
@@ -282,7 +282,7 @@ pub fn heat_transfer(ctx: *Context) !void {
         ref.heat_transfer(H, W, ref_grid, ref_out);
         @memcpy(ref_grid, ref_out);
     }
-    const ref_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const ref_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     // 2. Zig Optimized
     start = std.Io.Clock.awake.now(ctx.io);
@@ -290,15 +290,16 @@ pub fn heat_transfer(ctx: *Context) !void {
         opt.heat_transfer(H, W, opt_grid, opt_out);
         @memcpy(opt_grid, opt_out);
     }
-    const opt_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const opt_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     try expectApproxEq(ref_grid, opt_grid, 1e-4);
 
     // 3. ZML
     const shape = zml.Shape.init(.{ .h = H, .w = W }, .f32);
     const replicated_sharding = try zml.sharding.replicatedSharding(ctx.platform);
-    var exe = try ctx.platform.compile(ctx.allocator, ctx.io, SimpleModel{}, .heat_transfer, .{
+    var exe = try ctx.platform.compile(ctx.allocator, ctx.io, SimpleModel{}, .heat_transfer_steps, .{
         zml.Tensor.fromShape(shape),
+        zml.Tensor.init(.{}, .i32),
     }, .{ .shardings = &.{replicated_sharding} });
     defer exe.deinit();
 
@@ -309,31 +310,23 @@ pub fn heat_transfer(ctx: *Context) !void {
 
     var zml_in_buf = try ctx.bufferFromSlice(shape, grid_init);
     defer zml_in_buf.deinit();
+    var steps_i32: i32 = @intCast(steps);
+    var steps_buf = try ctx.bufferFromSlice(zml.Shape.scalar(.i32), std.mem.asBytes(&steps_i32));
+    defer steps_buf.deinit();
 
     start = std.Io.Clock.awake.now(ctx.io);
-    var curr = zml_in_buf;
-    var is_initial = true;
-    for (0..steps) |_| {
-        args.set(.{curr});
-        exe.call(args, &results);
-        const next = results.get(zml.Buffer);
-
-        if (!is_initial) {
-            curr.deinit();
-        }
-        curr = next;
-        is_initial = false;
-    }
-    var final_buf = curr;
-    const zml_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    args.set(.{ zml_in_buf, steps_buf });
+    exe.call(args, &results);
+    var final_buf: zml.Buffer = results.get(zml.Buffer);
+    const zml_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
+    defer final_buf.deinit();
 
     const zml_out = try ctx.allocator.alloc(f32, H * W);
     defer ctx.allocator.free(zml_out);
     try ctx.sliceFromBuffer(final_buf, zml_out);
-    final_buf.deinit();
 
     try expectApproxEq(ref_grid, zml_out, 1e-3);
-    log.info("✅ Heat Transfer Verified. Zig(Ref): {d:.2}ms, Zig(Opt): {d:.2}ms, ZML: {d:.2}ms", .{ ref_ms, opt_ms, zml_ms });
+    log.info("✅ Heat Transfer Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
 }
 
 /// Benchmarks the Black-Scholes option pricing model comparing reference, optimized, and ZML implementations.
@@ -389,12 +382,12 @@ pub fn black_scholes(ctx: *Context) !void {
     // 1. Zig Reference
     var start = std.Io.Clock.awake.now(ctx.io);
     ref.black_scholes(N, s, k, t, r_val, sigma, ref_call, ref_put);
-    const ref_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const ref_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     // 2. Zig Optimized
     start = std.Io.Clock.awake.now(ctx.io);
     opt.black_scholes(N, s, k, t, r_val, sigma, opt_call, opt_put);
-    const opt_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const opt_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     try expectApproxEq(ref_call, opt_call, 1e-3);
     try expectApproxEq(ref_put, opt_put, 1e-3);
@@ -431,7 +424,7 @@ pub fn black_scholes(ctx: *Context) !void {
 
     start = std.Io.Clock.awake.now(ctx.io);
     exe.call(args, &results);
-    const zml_ms = start.untilNow(ctx.io, .awake).toMilliseconds();
+    const zml_ns = start.untilNow(ctx.io, .awake).toNanoseconds();
 
     const ResStruct = struct { call: zml.Buffer, put: zml.Buffer };
     var res_bufs = results.get(ResStruct);
@@ -451,5 +444,5 @@ pub fn black_scholes(ctx: *Context) !void {
     try expectApproxEq(ref_call, zml_call, 1e-3);
     try expectApproxEq(ref_put, zml_put, 1e-3);
 
-    log.info("✅ Black-Scholes Verified. Zig(Ref): {d:.2}ms, Zig(Opt): {d:.2}ms, ZML: {d:.2}ms", .{ ref_ms, opt_ms, zml_ms });
+    log.info("✅ Black-Scholes Verified. Zig(Ref): {d:.2}ns, Zig(Opt): {d:.2}ns, ZML: {d:.2}ns", .{ ref_ns, opt_ns, zml_ns });
 }

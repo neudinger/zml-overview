@@ -1,4 +1,4 @@
-# A Zml Overview - Zig & ZML Algorithm Benchmark Suite
+# A ZML Overview - Zig & ZML Algorithm Benchmark Suite
 
 ## Overview
 
@@ -133,7 +133,7 @@ Because the project uses Bazel, you can build, run, and test the suite using sta
 **To run the main benchmark suite:**
 
 ```bash
-bazel run //simple
+bazel run -c opt //simple
 ```
 
 **To run the standard unit tests (verifying `optimized.zig` vs `reference.zig`):**
